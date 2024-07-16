@@ -31,7 +31,7 @@ class EventLoop:
                         iter = self.run_child_gen(iter, main_gen)
                     elif isinstance(iter,Task): # unblocking task
                         iter = self.run_iteration_until_complete(main_gen,iter)
-                    else:
+                    elif isinstance(iter,Future):
                         iter = self.run_iteration_until_complete(main_gen,iter)
             except StopIteration:
                 pass
@@ -56,6 +56,8 @@ class EventLoop:
         # main gen
         while True:
             try:
+                if len(self.select_connections) == 0:
+                    self.check_queue_connections()
                 if fut.finished:
                     iter = gen.send(fut.result)
                     return iter
@@ -69,8 +71,8 @@ class EventLoop:
             except OSError:
                 """
                     socket could already be unregistered because
-                    it could finish before the task is ready
-                    to check if the socket has data due to the
+                    it could finish before the unblocking task is ready
+                    to check if the socket has received data due to the
                     task's nonblocking functionality
                 """
                 if isinstance(fut,Task):

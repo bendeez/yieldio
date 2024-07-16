@@ -30,8 +30,17 @@ loop = EventLoop(max_connections=15)
 #     result = yield loop.add_connection(Connection.create_connection("https://www.google.com/"))
 #     print(result)
 
-def task_1(url):
+def task_3():
+    result = yield loop.add_connection(Connection.create_connection("https://www.google.com/"))
+    print(result)
     result_1 = yield loop.gather(*[Connection.create_connection("https://www.google.com/") for _ in range(10)])
+    return result_1
+def task_2():
+    result_1 = yield from task_3()
+    return result_1
+
+def task_1(url):
+    result_1 = yield from task_2()
     result = yield loop.gather(*[Connection.create_connection(url) for _ in range(10)])
     return result_1
 def main():

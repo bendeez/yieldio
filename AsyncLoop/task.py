@@ -46,11 +46,16 @@ class Task(Future):
     def start(self):
         """
             runs task without blocking
+            selector callbacks will resume task
         """
         if self.main_called_function:
             if self.called_function_finished: # for child gen if one was running (means main gen has already ran)
                 try:
-                    iter = self.main_called_function.send([fut.result for fut in self.returned_futures]) # returned from child gen
+                    if isinstance(self.returned_futures,list):
+                        result = [fut.result for fut in self.returned_futures]
+                    else:
+                        result = self.returned_futures.result # single future was returned
+                    iter = self.main_called_function.send(result) # returned from child gen
                     self.called_function_finished = False  # set it to false for next generator
                     if inspect.isgenerator(iter):
                         self.run_child_gen(iter)
@@ -64,13 +69,23 @@ class Task(Future):
                         if inspect.isgenerator(iter):
                             self.called_function = iter
                             self.run_child_gen(iter)
-                        else:
-                            while True:
-                                fut = gen.send(iter)
-                                fut.unblocking_task = self
-                                self.unfinished_futures.append(fut)
+                        elif isinstance(iter,Future):
+                            fut = iter
+                            fut.unblocking_task = self
+                            self.returned_futures = fut
+                            self.unfinished_futures.append(fut)
+                            self.called_function_finished = True
+                            # fut = gen.send(iter)
+                            # if inspect.isgenerator(fut):
+                            #     self.called_function = fut
+                            #     self.run_child_gen(fut)
+                            # else:
+                            #     fut.unblocking_task = self
+                            #     self.unfinished_futures.append(fut)
+                            #     self.called_function_finished = True
                     except StopIteration as e:
-                        self.returned_futures = e.value.result
+                        if isinstance(e.value,(Future,Task)):
+                            self.returned_futures = e.value.result
                         self.called_function_finished = True
                 elif isinstance(self.main_called_function,Future):
                     fut = self.main_called_function
@@ -86,8 +101,11 @@ class Task(Future):
             iter = next(gen)
             while True:
                 fut = gen.send(iter)
-                fut.unblocking_task = self
-                self.unfinished_futures.append(fut)
+                if inspect.isgenerator(fut):
+                    self.run_child_gen(fut)
+                elif isinstance(fut,Future):
+                    fut.unblocking_task = self
+                    self.unfinished_futures.append(fut)
         except StopIteration as e:
             """
                 the task is a task inside this unblocking task
@@ -96,7 +114,7 @@ class Task(Future):
             self.returned_futures = task.result # task result are futures that will be set later
             self.called_function_finished = True
 
-    def update_progress(self,fut,result):
+    def update_progress(self,fut=None):
         """
             selector result callbacks will continue the task
         :param fut:
