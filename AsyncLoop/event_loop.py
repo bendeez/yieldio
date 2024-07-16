@@ -15,44 +15,67 @@ class EventLoop:
 
     def run(self, main_gen):
         # main gen
+        iter = next(main_gen) # start the generator and returns first yield
+        self.run_main_gen(main_gen,iter)
+
+    def run_main_gen(self,main_gen,iter):
         if inspect.isgenerator(main_gen):
             try:
-                iter = next(main_gen)
-                if inspect.isgenerator(iter):
-                    self.run_child_gen(iter, main_gen)
-                else:
-                    self.run_main_gen(main_gen,iter)
+                while True:
+                    """ 
+                        returning iter 
+                        overrides previous iter with updated generator iter for the next
+                        iteration of the while loop
+                    """
+                    if inspect.isgenerator(iter):
+                        iter = self.run_child_gen(iter, main_gen)
+                    elif isinstance(iter,Task): # unblocking task
+                        iter = self.run_iteration_until_complete(main_gen,iter)
+                    else:
+                        iter = self.run_iteration_until_complete(main_gen,iter)
             except StopIteration:
                 pass
 
-    def run_main_gen(self,main_gen,fut):
-        self.run_iteration_until_complete(main_gen, fut)
-        self.run(main_gen)
-
     def run_child_gen(self, child_gen, main_gen):
         try:
-            child_gen_iter = next(child_gen)
+            child_gen_iter = next(child_gen) # adds all connection sockets to selectors to start the requests
             while True:
-                self.run_iteration_until_complete(child_gen,child_gen_iter)
+                child_gen_iter = self.run_iteration_until_complete(child_gen,child_gen_iter)
         except StopIteration as e:
             task = e.value
-            iter = main_gen.send(task.result)
-            self.run_main_gen(main_gen,iter)
+            iter = main_gen.send(task.result) # returns next iteration of the main generator
+            return iter
 
     def run_iteration_until_complete(self, gen, fut):
+        """
+        selector callbacks continue unblocking tasks
+        :param gen:
+        :param fut:
+        :return:
+        """
         # main gen
         while True:
-            self.check_queue_connections()
-            if len(self.select_connections) == 0:
-                gen.send(fut.result)
-                break
-            events = self.select.select()
-            for key, mask in events:
-                connection = key.data
-                if mask & selectors.EVENT_READ:
-                    connection.read_callback(loop=self)
-                if mask & selectors.EVENT_WRITE:
-                    connection.write_callback(loop=self)
+            try:
+                if fut.finished:
+                    iter = gen.send(fut.result)
+                    return iter
+                events = self.select.select()
+                for key, mask in events:
+                    connection = key.data
+                    if mask & selectors.EVENT_READ:
+                        connection.read_callback(loop=self)
+                    if mask & selectors.EVENT_WRITE:
+                        connection.write_callback(loop=self)
+            except OSError:
+                """
+                    socket could already be unregistered because
+                    it could finish before the task is ready
+                    to check if the socket has data due to the
+                    task's nonblocking functionality
+                """
+                if isinstance(fut,Task):
+                    fut.start()
+
 
     def check_queue_connections(self):
         """
@@ -74,8 +97,14 @@ class EventLoop:
         yield from task.gather_tasks(*args)
         return task
 
-    def create_task(self, coro):
-        task = Task(self,coro)
+    def create_task(self, called_function):
+        """
+        any function that returns
+        a future instance
+        :param fut:
+        :return: task
+        """
+        task = Task(self, called_function)
         task.start()
         return task
 
