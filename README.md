@@ -1,7 +1,16 @@
+*Work in Progress!*
+A custom made event loop with yield and yield from,
+background tasks, and helper functions, along with concurrent synchronization.
+
+The selectors module makes this all possible.
+
+https://docs.python.org/3/library/selectors.html
+
+![Screenshot 2024-06-21 125920](https://github.com/bendeez/async_event_loop/assets/127566471/378260f9-9145-49ff-b910-366f1204171f)
+
+```python
 from AsyncLoop import EventLoop
 from AsyncLoop import Connection
-
-
 
 loop = EventLoop(max_connections=15)
 

@@ -14,27 +14,27 @@ class EventLoop:
         self.connection_queue = Queue()
 
     def run(self, main_gen):
-        # main gen
-        iter = next(main_gen) # start the generator and returns first yield
-        self.run_main_gen(main_gen,iter)
+        if inspect.isgenerator(main_gen):
+            # main gen
+            iter = next(main_gen) # start the generator and returns first yield
+            self.run_main_gen(main_gen,iter)
 
     def run_main_gen(self,main_gen,iter):
-        if inspect.isgenerator(main_gen):
-            try:
-                while True:
-                    """ 
-                        returning iter 
-                        overrides previous iter with updated generator iter for the next
-                        iteration of the while loop
-                    """
-                    if inspect.isgenerator(iter):
-                        iter = self.run_child_gen(iter, main_gen)
-                    elif isinstance(iter,Task): # unblocking task
-                        iter = self.run_iteration_until_complete(main_gen,iter)
-                    elif isinstance(iter,Future):
-                        iter = self.run_iteration_until_complete(main_gen,iter)
-            except StopIteration:
-                pass
+        try:
+            while True:
+                """ 
+                    returning iter 
+                    overrides previous iter with updated generator iter for the next
+                    iteration of the while loop
+                """
+                if inspect.isgenerator(iter):
+                    iter = self.run_child_gen(iter, main_gen)
+                elif isinstance(iter,Task): # unblocking task
+                    iter = self.run_iteration_until_complete(main_gen,iter)
+                elif isinstance(iter,Future):
+                    iter = self.run_iteration_until_complete(main_gen,iter)
+        except StopIteration:
+            pass
 
     def run_child_gen(self, child_gen, main_gen):
         try:
@@ -90,7 +90,7 @@ class EventLoop:
             if not self.connection_queue.empty():
                 connection = self.connection_queue.get()
                 if connection.fut:
-                    self.add_connection(connection,connection.fut)
+                    self.add_connection(connection, connection.fut)
                 else:
                     self.add_connection(connection)
 
@@ -110,24 +110,21 @@ class EventLoop:
         task.start()
         return task
 
-    def add_connection(self, connection, fut=None,in_gather=False):
+    def add_connection(self, connection, fut=None):
         """
-            in gather=False makes it so we know to set the
-            task's fut reference to synchronize the task
-            in between print statements
-
-            in_gather=True means that the setting
-            the task's fut reference will be set
-            in the task's gather function because only
-            the last future/connection of the gather function
-            needs to be set to the task's fut reference
+            if the fut is not none, it means that when the
+            connection initially was attempted to be registered
+            to the selectors but there were too many connections
+            so the connection was sent to the queue along with
+            its future already being set
+        :param connection:
+        :param fut:
+        :return:
         """
         if fut is None:
             fut = Future()
             connection.fut = fut
-        if not in_gather:
-            Task.fut_reference.append(fut)
-        connection.connection_callback()
+        connection.connection_callback() # initializes connection
         if len(self.select_connections) < self.max_connections:
             self.select_connections.append(connection)
             self.select.register(connection.client, selectors.EVENT_READ | selectors.EVENT_WRITE,
