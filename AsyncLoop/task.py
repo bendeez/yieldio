@@ -64,11 +64,6 @@ class Task(Future):
             else:
                 self.run_main_generator_task(iter)
         except StopIteration as e:
-            """
-                The task values that are being set
-                could be tasks inside a gather generator
-                or the main task.
-            """
             self.set_result(e.value)
 
     def run_main_generator_task(self,iter):
@@ -101,6 +96,13 @@ class Task(Future):
     def run_child_gen(self,gen):
         try:
             iter = next(gen)
+            iter.unblocking_task = self
+            if isinstance(iter, Future):
+                """
+                    tasks can also be futures because they inherit from it
+                """
+                iter.unblocking_task = self
+                self.unfinished_futures.append(iter)
             while True:
                 fut = gen.send(iter)
                 if inspect.isgenerator(fut):
