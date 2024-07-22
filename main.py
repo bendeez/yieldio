@@ -1,5 +1,4 @@
-from AsyncLoop import EventLoop
-from AsyncLoop import Connection
+from yieldio import EventLoop, Connection
 
 
 
@@ -19,8 +18,10 @@ def task_2():
 def task_1():
     result = yield loop.gather(loop.create_task(task_3()),loop.create_task(task_2()),loop.add_connection(Connection.create_connection("https://www.google.com/")))
     return result
+
 def main():
     result = yield loop.create_task(task_1())
+    print(result)
 
 
 loop.run(main())
