@@ -14,7 +14,6 @@ class Connection:
         self.host = host
         self.port = port
         self.path = path
-        self.connection_callback = self.initialize_connection
         self.write_callback = self.send_request
         self.read_callback = self.get_response
         """

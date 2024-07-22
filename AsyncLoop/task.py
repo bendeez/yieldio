@@ -13,12 +13,36 @@ class Task(Future):
         """
         self.main_called_function = called_function
         self.finished_iteration = False
+        """
+            finished futures references the
+            returning futures of a generator
+            because all the futures are
+            returned as future objects
+            (not their results)
+            because of the task's 
+            nonblocking functionality
+            
+            when setting the result of a 
+            main or child task, the result
+            is made up of the results of one
+            or many futures
+            
+            the results of the *returned
+            futures* will make up the
+            result of the task
+        """
         self.returned_futures = []
-        self.unfinished_futures = [] # keep track of unfinished futures to avoid unfinished results
+        """
+            keeps track of unfinished futures to notify via
+            a conditional statement that all the futures of
+            a previous part of a task were set before the
+            task resumes to the next part
+        """
+        self.unfinished_futures = []
 
     def gather_tasks(self,*tasks):
         """
-            gather connections and tasks
+            gather generators and futures
             This task could be inside another task
         """
         responses = []
@@ -67,6 +91,11 @@ class Task(Future):
             self.set_result(e.value)
 
     def run_main_generator_task(self,iter):
+        """
+            selector callback will resume this task
+        :param iter:
+        :return:
+        """
         try:
             if inspect.isgenerator(iter):
                 self.run_child_gen(iter)
@@ -82,16 +111,19 @@ class Task(Future):
             self.finished_iteration = True
 
     def run_main_non_generator_task(self):
+        """
+            selector callback will resume this task
+            with the self.main_finished_iteration
+            being True (assuming it's not True)
+        """
         fut = self.main_called_function
-        if self.main_finished_iteration:
+        if self.finished_iteration:
             self.set_result(fut.result)
         else:
             fut.unblocking_task = self
             self.unfinished_futures.append(fut)
-            self.main_finished_iteration = True
-            """
-                selector callback will resume this task
-            """
+            self.finished_iteration = True
+
 
     def run_child_gen(self,gen):
         try:
@@ -104,15 +136,20 @@ class Task(Future):
                 iter.unblocking_task = self
                 self.unfinished_futures.append(iter)
             while True:
-                fut = gen.send(iter)
-                if inspect.isgenerator(fut):
-                    self.run_child_gen(fut)
-                elif isinstance(fut,Future):
+                """ 
+                    returning iter that
+                    overrides previous iter with updated generator iter for the next
+                    iteration of the while loop
+                """
+                iter = gen.send(iter)
+                if inspect.isgenerator(iter):
+                    self.run_child_gen(iter)
+                elif isinstance(iter,Future):
                     """
                         tasks can also be futures because they inherit from it
                     """
-                    fut.unblocking_task = self
-                    self.unfinished_futures.append(fut)
+                    iter.unblocking_task = self
+                    self.unfinished_futures.append(iter)
         except StopIteration as e:
             """
                 the task is a task inside this unblocking task
@@ -130,4 +167,7 @@ class Task(Future):
         """
         self.unfinished_futures.remove(fut)
         if len(self.unfinished_futures) == 0:
-            self.start() # continue task after previous future is set
+            """
+                continue task after all futures of this segment are set
+            """
+            self.start()

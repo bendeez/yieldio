@@ -23,7 +23,7 @@ class EventLoop:
         try:
             while True:
                 """ 
-                    returning iter 
+                    returning iter that
                     overrides previous iter with updated generator iter for the next
                     iteration of the while loop
                 """
@@ -38,7 +38,11 @@ class EventLoop:
 
     def run_child_gen(self, child_gen, main_gen):
         try:
-            child_gen_iter = next(child_gen) # adds all connection sockets to selectors to start the requests
+            """
+                adds all connection sockets to selectors to start the requests 
+                assuming it's yielding the event loop methods 
+            """
+            child_gen_iter = next(child_gen)
             while True:
                 child_gen_iter = self.run_iteration_until_complete(child_gen,child_gen_iter)
         except StopIteration as e:
@@ -73,7 +77,9 @@ class EventLoop:
                     socket could already be unregistered because
                     it could finish before the unblocking task is ready
                     to check if the socket has received data due to the
-                    task's nonblocking functionality
+                    task's nonblocking functionality (future within
+                    task has already been set within the selector callback
+                    so the task will be resumed)    
                 """
                 if isinstance(fut,Task):
                     fut.start()
@@ -116,7 +122,7 @@ class EventLoop:
             connection initially was attempted to be registered
             to the selectors but there were too many connections
             so the connection was sent to the queue along with
-            its future already being set
+            its future attribute being set
         :param connection:
         :param fut:
         :return:
@@ -124,7 +130,7 @@ class EventLoop:
         if fut is None:
             fut = Future()
             connection.fut = fut
-        connection.connection_callback() # initializes connection
+        connection.initialize_connection() # initializes connection
         if len(self.select_connections) < self.max_connections:
             self.select_connections.append(connection)
             self.select.register(connection.client, selectors.EVENT_READ | selectors.EVENT_WRITE,

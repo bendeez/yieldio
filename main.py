@@ -20,8 +20,7 @@ def task_1():
     result = yield loop.gather(loop.create_task(task_3()),loop.create_task(task_2()),loop.add_connection(Connection.create_connection("https://www.google.com/")))
     return result
 def main():
-    result = yield from task_1()
-    print(result)
+    result = yield loop.create_task(task_1())
 
 
 loop.run(main())
