@@ -21,7 +21,8 @@ def task_1():
 
 def main():
     result = yield loop.create_task(task_1())
-    print(result)
+    for r in result:
+        print(r)
 
 
 loop.run(main())

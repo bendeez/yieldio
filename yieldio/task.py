@@ -100,10 +100,9 @@ class Task(Future):
             if inspect.isgenerator(iter):
                 self.run_child_gen(iter)
             elif isinstance(iter, Future):
-                fut = iter
-                fut.unblocking_task = self
-                self.returned_futures = fut
-                self.unfinished_futures.append(fut)
+                iter.add_done_callback(self.update_progress, fut=iter)
+                self.returned_futures = iter
+                self.unfinished_futures.append(iter)
                 self.finished_iteration = True
         except StopIteration as e:
             if isinstance(e.value, (Future, Task)):
@@ -120,7 +119,7 @@ class Task(Future):
         if self.finished_iteration:
             self.set_result(fut.result)
         else:
-            fut.unblocking_task = self
+            fut.add_done_callback(self.update_progress)
             self.unfinished_futures.append(fut)
             self.finished_iteration = True
 
@@ -128,12 +127,11 @@ class Task(Future):
     def run_child_gen(self,gen):
         try:
             iter = next(gen)
-            iter.unblocking_task = self
             if isinstance(iter, Future):
                 """
                     tasks can also be futures because they inherit from it
                 """
-                iter.unblocking_task = self
+                iter.add_done_callback(self.update_progress,fut=iter)
                 self.unfinished_futures.append(iter)
             while True:
                 """ 
@@ -148,7 +146,7 @@ class Task(Future):
                     """
                         tasks can also be futures because they inherit from it
                     """
-                    iter.unblocking_task = self
+                    iter.add_done_callback(self.update_progress, fut=iter)
                     self.unfinished_futures.append(iter)
         except StopIteration as e:
             """
