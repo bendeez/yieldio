@@ -9,7 +9,8 @@ class Task(Future):
 
     def gather_tasks(self,*tasks):
         """
-            gather generators and futures
+            gather tasks and futures
+            a task is a subclass of a future
             This task could be inside another task
         """
         responses = []

@@ -6,108 +6,122 @@ import inspect
 
 
 class EventLoop:
+    running_loop = None
 
-    def __init__(self, max_connections=100):
-        self.select_connections = []
+    def __init__(self, max_clients=100):
+        EventLoop.running_loop = self
+        self.select_clients = []
         self.select = selectors.DefaultSelector()
-        self.max_connections = max_connections
-        self.connection_queue = Queue()
+        self.max_clients = max_clients
+        self.client_queue = Queue()
 
-    def run(self, main_gen):
+    def run_gen(self, main_gen):
         if inspect.isgenerator(main_gen):
             fut = next(main_gen)
-            self.run_iteration_until_complete(fut)
+            self.run_iteration_until_complete()
             try:
                 while True:
                     fut = main_gen.send(fut.result)
-                    self.run_iteration_until_complete(fut)
+                    self.run_iteration_until_complete()
             except StopIteration:
                 pass
 
-    def run_iteration_until_complete(self, fut):
+    def run_iteration_until_complete(self):
         """
         selector callbacks continue unblocking tasks
-        :param gen:
-        :param fut:
         :return:
         """
         while True:
-            self.check_queue_connections()
-            if len(self.select_connections) == 0:
+            self.check_queue_clients()
+            if len(self.select_clients) == 0:
                 break
             events = self.select.select()
             for key, mask in events:
-                connection = key.data
+                client = key.data
                 if mask & selectors.EVENT_READ:
-                    connection.read_callback(loop=self)
+                    client.read_callback(loop=self)
                 if mask & selectors.EVENT_WRITE:
-                    connection.write_callback(loop=self)
+                    client.write_callback(loop=self)
 
 
-    def check_queue_connections(self):
+    def check_queue_clients(self):
         """
             checks for waiting requests/connections when
             the max connection level isn't reach
             after a connection has been removed from
             select connections
         """
-        if len(self.select_connections) < self.max_connections:
-            if not self.connection_queue.empty():
-                connection = self.connection_queue.get()
-                if connection.fut:
-                    self.add_connection(connection, connection.fut)
-                else:
-                    self.add_connection(connection)
+        if len(self.select_clients) < self.max_clients:
+            if not self.client_queue.empty():
+                client = self.client_queue.get()
+                self.select_clients.append(client)
+                self.select.register(client.sock, selectors.EVENT_READ | selectors.EVENT_WRITE,
+                                     data=client)
 
-    def gather(self, *args):
-        task = Task(loop=self)
-        yield from task.gather_tasks(*args)
-        return task.result
-
-    def create_task(self, called_function):
-        """
-        any function that returns
-        a future instance
-        :param fut:
-        :return: task
-        """
-        task = Task(self, called_function)
-        task.start()
-        return task
-
-    def add_connection(self, connection, fut=None):
+    def add_client(self, client):
         """
             if the fut is not none, it means that when the
             connection initially was attempted to be registered
             to the selectors but there were too many connections
             so the connection was sent to the queue along with
             its future attribute being set
-        :param connection:
-        :param fut:
+        :param client
         :return:
         """
-        if fut is None:
-            fut = Future()
-            connection.fut = fut
-        connection.initialize_connection() # initializes connection
-        if len(self.select_connections) < self.max_connections:
-            self.select_connections.append(connection)
-            self.select.register(connection.client, selectors.EVENT_READ | selectors.EVENT_WRITE,
-                                 data=connection)
+        fut = Future()
+        client.fut = fut
+        if len(self.select_clients) < self.max_clients:
+            self.select_clients.append(client)
+            self.select.register(client.sock, selectors.EVENT_READ | selectors.EVENT_WRITE,
+                                 data=client)
         else:
             # limits the amount of concurrent connections
-            self.connection_queue.put(connection)
+            self.client_queue.put(client)
         return fut
 
-    def remove_connection(self, connection):
-        self.select_connections.remove(connection)
-        self.select.unregister(connection.client)
+    def remove_client(self, client):
+        self.select_clients.remove(client)
+        self.select.unregister(client.sock)
 
-    def modify_event(self, connection, method):
+    def modify_event(self, client, method):
         if method == "r":
             event = selectors.EVENT_READ
         elif method == "w":
             event = selectors.EVENT_WRITE
         else:
             return
-        self.select.modify(connection.client, event, data=connection)
+        self.select.modify(client.sock, event, data=client)
+
+    @classmethod
+    def run(cls, main_gen, max_clients=100):
+        loop = cls(max_clients=max_clients)
+        loop.run_gen(main_gen)
+
+    @staticmethod
+    def gather(*args):
+        loop = EventLoop.running_loop
+        if loop is not None:
+            task = Task(loop=loop)
+            yield from task.gather_tasks(*args)
+            return task.result
+        else:
+            raise RuntimeError("No event loop is running")
+
+    @staticmethod
+    def create_task(gen):
+        loop = EventLoop.running_loop
+        if loop is not None:
+            if inspect.isgenerator(gen):
+                """
+                any function that returns
+                a future instance
+                :param fut:
+                :return: task
+                """
+                task = Task(loop, gen)
+                task.start()
+                return task
+            else:
+                raise Exception("Tasks can only wrap around generators")
+        else:
+            raise RuntimeError("No event loop is running")
