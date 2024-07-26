@@ -15,74 +15,33 @@ class EventLoop:
 
     def run(self, main_gen):
         if inspect.isgenerator(main_gen):
-            # main gen
-            iter = next(main_gen) # start the generator and returns first yield
-            self.run_main_gen(main_gen,iter)
+            fut = next(main_gen)
+            self.run_iteration_until_complete(fut)
+            try:
+                while True:
+                    fut = main_gen.send(fut.result)
+                    self.run_iteration_until_complete(fut)
+            except StopIteration:
+                pass
 
-    def run_main_gen(self,main_gen,iter):
-        try:
-            while True:
-                """ 
-                    returning iter that
-                    overrides previous iter with updated generator iter for the next
-                    iteration of the while loop
-                """
-                if inspect.isgenerator(iter):
-                    iter = self.run_child_gen(iter, main_gen)
-                elif isinstance(iter,Task): # unblocking task
-                    iter = self.run_iteration_until_complete(main_gen,iter)
-                elif isinstance(iter,Future):
-                    iter = self.run_iteration_until_complete(main_gen,iter)
-        except StopIteration:
-            pass
-
-    def run_child_gen(self, child_gen, main_gen):
-        try:
-            """
-                adds all connection sockets to selectors to start the requests 
-                assuming it's yielding the event loop methods 
-            """
-            child_gen_iter = next(child_gen)
-            while True:
-                child_gen_iter = self.run_iteration_until_complete(child_gen,child_gen_iter)
-        except StopIteration as e:
-            task = e.value
-            iter = main_gen.send(task.result) # returns next iteration of the main generator
-            return iter
-
-    def run_iteration_until_complete(self, gen, fut):
+    def run_iteration_until_complete(self, fut):
         """
         selector callbacks continue unblocking tasks
         :param gen:
         :param fut:
         :return:
         """
-        # main gen
         while True:
-            try:
-                if len(self.select_connections) == 0:
-                    self.check_queue_connections()
-                if fut.finished:
-                    iter = gen.send(fut.result)
-                    return iter
-                events = self.select.select()
-                for key, mask in events:
-                    connection = key.data
-                    if mask & selectors.EVENT_READ:
-                        connection.read_callback(loop=self)
-                    if mask & selectors.EVENT_WRITE:
-                        connection.write_callback(loop=self)
-            except OSError:
-                """
-                    socket could already be unregistered because
-                    it could finish before the unblocking task is ready
-                    to check if the socket has received data due to the
-                    task's nonblocking functionality (future within
-                    task has already been set within the selector callback
-                    so the task will be resumed)    
-                """
-                if isinstance(fut,Task):
-                    fut.start()
+            self.check_queue_connections()
+            if len(self.select_connections) == 0:
+                break
+            events = self.select.select()
+            for key, mask in events:
+                connection = key.data
+                if mask & selectors.EVENT_READ:
+                    connection.read_callback(loop=self)
+                if mask & selectors.EVENT_WRITE:
+                    connection.write_callback(loop=self)
 
 
     def check_queue_connections(self):
@@ -103,7 +62,7 @@ class EventLoop:
     def gather(self, *args):
         task = Task(loop=self)
         yield from task.gather_tasks(*args)
-        return task
+        return task.result
 
     def create_task(self, called_function):
         """
